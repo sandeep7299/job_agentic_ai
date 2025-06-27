@@ -1,41 +1,38 @@
-import os, time, urllib.parse
-from bs4 import BeautifulSoup
-from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+@@
+ from playwright.sync_api import sync_playwright
++import pandas as pd
+ 
+@@
+-        for link in soup.select("a.base-card__full-link"):
+-            title = link.get_text(" ", strip=True)
+-            print(f"{title}  →  {link['href'].split('?')[0]}")
++        rows = []
++
++        for card in soup.select("ul.jobs-search__results-list li"):
++            link    = card.select_one("a.base-card__full-link")
++            title   = link.get_text(" ", strip=True)
++            url     = link["href"].split("?")[0]
++            company = card.select_one("h4.base-search-card__subtitle").get_text(" ", strip=True)
++            location= card.select_one("span.job-search-card__location").get_text(" ", strip=True)
++
++            # open the posting in a background tab to grab description text
++            page2 = ctx.new_page()
++            page2.goto(url, timeout=0)
++            page2.wait_for_selector("div[data-test-description-section]", timeout=60000)
++            desc  = page2.query_selector("div[data-test-description-section]").inner_text()[:2000]
++            page2.close()
++
++            rows.append({
++                "title": title,
++                "company": company,
++                "location": location,
++                "url": url,
++                "description": desc
++            })
++
++        # --- save to Excel ----------------------------------------------
++        df = pd.DataFrame(rows)
++        fname = f"jobs_{pd.Timestamp.today().date()}.xlsx"
++        df.to_excel(fname, index=False)
++        print(f"\nSaved → {fname}  ({len(df)} rows)")
 
-load_dotenv()
-COOKIE = os.getenv("LI_AT")
-SEARCH = "Data Scientist"
-LOCATION = "United States"
-
-def main():
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(storage_state={
-            "cookies": [{
-                "name": "li_at",
-                "value": COOKIE,
-                "domain": ".www.linkedin.com",
-                "path": "/",
-                "httpOnly": True,
-                "secure": True
-            }]
-        })
-        page = ctx.new_page()
-        q = urllib.parse.quote_plus(SEARCH)
-        loc = urllib.parse.quote_plus(LOCATION)
-        url = (f"https://www.linkedin.com/jobs/search/?keywords={q}"
-               f"&location={loc}&f_AL=true")
-        page.goto(url, timeout=0)
-        page.wait_for_selector("ul.jobs-search__results-list li")
-        page.mouse.wheel(0, 3000); time.sleep(1)
-
-        soup = BeautifulSoup(page.content(), "html.parser")
-        for link in soup.select("a.base-card__full-link"):
-            title = link.get_text(" ", strip=True)
-            print(f"{title}  →  {link['href'].split('?')[0]}")
-
-        browser.close()
-
-if __name__ == "__main__":
-    main()
